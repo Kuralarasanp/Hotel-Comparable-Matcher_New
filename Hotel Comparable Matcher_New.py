@@ -46,6 +46,7 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file)
     df.columns = [col.strip() for col in df.columns]
 
+    # Preprocessing
     for col in ['No. of Rooms', 'Market Value-2024', '2024 VPR']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df = df.dropna(subset=['No. of Rooms', 'Market Value-2024', '2024 VPR'])
@@ -68,76 +69,71 @@ if uploaded_file:
     else:
         selected_rows = df[df['Project / Hotel Name'].isin(selected_hotels)]
 
+    # Filters
     mv_min = st.number_input("🔽 Market Value Min Filter %", 0.0, 500.0, 80.0, 1.0)
     mv_max = st.number_input("🔼 Market Value Max Filter %", mv_min, 500.0, 120.0, 1.0)
     vpr_min = st.number_input("🔽 VPR Min Filter %", 0.0, 500.0, 80.0, 1.0)
     vpr_max = st.number_input("🔼 VPR Max Filter %", vpr_min, 500.0, 120.0, 1.0)
 
+    max_results_per_row = 5
+    all_columns = df.columns.tolist()
+
     if st.button("🚀 Run Matching"):
-        selected_results = []
-        st.write("### ✅ Select Match Results for Download")
+        result_rows = []
 
-        for i, (_, base_row) in enumerate(selected_rows.iterrows()):
-            base_name = base_row['Project / Hotel Name']
-            base_market_val = base_row['Market Value-2024']
-            base_vpr = base_row['2024 VPR']
-            base_order = base_row['Hotel Class Order']
-            allowed_orders = allowed_orders_map.get(base_order, [])
+        with st.spinner("🔍 Matching in progress..."):
+            for _, base_row in selected_rows.iterrows():
+                base_name = base_row['Project / Hotel Name']
+                base_market_val = base_row['Market Value-2024']
+                base_vpr = base_row['2024 VPR']
+                base_order = base_row['Hotel Class Order']
+                allowed_orders = allowed_orders_map.get(base_order, [])
 
-            subset = df[df.index != base_row.name]
-            mask = (
-                (subset['State'] == base_row['State']) &
-                (subset['Property County'] == base_row['Property County']) &
-                (subset['No. of Rooms'] < base_row['No. of Rooms']) &
-                (subset['Market Value-2024'].between(base_market_val * (mv_min / 100), base_market_val * (mv_max / 100))) &
-                (subset['2024 VPR'].between(base_vpr * (vpr_min / 100), base_vpr * (vpr_max / 100))) &
-                (subset['Hotel Class Order'].isin(allowed_orders))
-            )
-            matching_rows = subset[mask].drop_duplicates(
-                subset=['Project / Hotel Name', 'Owner Street Address', 'Owner Name/ LLC Name'],
-                keep='first'
-            )
+                subset = df[df.index != base_row.name]
+                mask = (
+                    (subset['State'] == base_row['State']) &
+                    (subset['Property County'] == base_row['Property County']) &
+                    (subset['No. of Rooms'] < base_row['No. of Rooms']) &
+                    (subset['Market Value-2024'].between(base_market_val * (mv_min / 100), base_market_val * (mv_max / 100))) &
+                    (subset['2024 VPR'].between(base_vpr * (vpr_min / 100), base_vpr * (vpr_max / 100))) &
+                    (subset['Hotel Class Order'].isin(allowed_orders))
+                )
 
-            st.markdown(f"**🔹 Base Hotel: {base_name}** (Matches found: {len(matching_rows)})")
+                matching_rows = subset[mask].drop_duplicates(
+                    subset=['Project / Hotel Name', 'Owner Street Address', 'Owner Name/ LLC Name'],
+                    keep='first'
+                )
 
-            if not matching_rows.empty:
-                nearest_3 = get_nearest_three(matching_rows, base_market_val, base_vpr)
-                remaining = matching_rows[~matching_rows.index.isin(nearest_3.index)]
-                least_1 = get_least_one(remaining)
-                remaining = remaining[~remaining.index.isin(least_1.index)]
-                top_1 = get_top_one(remaining)
+                if not matching_rows.empty:
+                    nearest_3 = get_nearest_three(matching_rows, base_market_val, base_vpr)
+                    remaining = matching_rows[~matching_rows.index.isin(nearest_3.index)]
+                    least_1 = get_least_one(remaining)
+                    remaining = remaining[~remaining.index.isin(least_1.index)]
+                    top_1 = get_top_one(remaining)
 
-                final_matches = pd.concat([nearest_3, least_1, top_1]).drop_duplicates().reset_index(drop=True)
+                    final_matches = pd.concat([nearest_3, least_1, top_1]).drop_duplicates().reset_index(drop=True)
 
-                for idx in range(5):  # Up to 5 results
-                    if idx < len(final_matches):
+                    for idx in range(min(max_results_per_row, len(final_matches))):
                         match_row = final_matches.iloc[idx]
-                        label = f"Result {idx+1}: {match_row['Project / Hotel Name']} | MV: {match_row['Market Value-2024']:.1f}, VPR: {match_row['2024 VPR']:.1f}"
-                        key = f"{base_name}_result_{idx+1}"
-                        if st.checkbox(label, key=key):
-                            match_info = match_row.copy()
-                            match_info['Base Hotel'] = base_name
-                            match_info['Result No.'] = idx + 1
-                            selected_results.append(match_info)
-                    else:
-                        st.markdown(f"Result {idx+1}: _No match available_")
+                        combined = match_row.copy()
+                        combined['Base Hotel'] = base_name
+                        combined['Result No.'] = idx + 1
+                        result_rows.append(combined)
+                else:
+                    st.info(f"No matches found for **{base_name}**.")
 
-            else:
-                st.warning(f"No matches for {base_name}.")
-
-        # Final download
-        if selected_results:
-            download_df = pd.DataFrame(selected_results)
-            st.markdown("### 📥 Ready to Download Selected Matches")
-            st.dataframe(download_df)
+        if result_rows:
+            result_df = pd.DataFrame(result_rows)
+            st.success("✅ Matching complete")
+            st.dataframe(result_df)
 
             output = io.BytesIO()
-            download_df.to_excel(output, index=False)
+            result_df.to_excel(output, index=False)
             st.download_button(
-                label="📥 Download Selected Matches as Excel",
+                label="📥 Download All Matched Results",
                 data=output.getvalue(),
-                file_name="selected_hotel_matches.xlsx",
+                file_name="hotel_matched_results.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.info("☑️ Please select at least one result above to enable download.")
+            st.warning("⚠️ No matching results to download.")
