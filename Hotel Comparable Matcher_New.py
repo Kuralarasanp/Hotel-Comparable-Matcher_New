@@ -26,6 +26,7 @@ allowed_orders_map = {
     8: [7, 8]
 }
 
+# Matching logic helpers
 def get_least_one(df):
     return df.sort_values(['Market Value-2024', '2024 VPR'], ascending=[True, True]).head(1)
 
@@ -37,7 +38,7 @@ def get_nearest_three(df, target_mv, target_vpr):
     df['distance'] = np.sqrt((df['Market Value-2024'] - target_mv) ** 2 + (df['2024 VPR'] - target_vpr) ** 2)
     return df.sort_values('distance').head(3).drop(columns='distance')
 
-# UI
+# Streamlit UI
 st.title("🏨 Hotel Comparable Matcher Tool")
 
 uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
@@ -46,21 +47,24 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file)
     df.columns = [col.strip() for col in df.columns]
 
-    # Preprocessing
-    for col in ['No. of Rooms', 'Market Value-2024', '2024 VPR']:
+    # Clean and preprocess
+    cols_to_numeric = ['No. of Rooms', 'Market Value-2024', '2024 VPR']
+    for col in cols_to_numeric:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=['No. of Rooms', 'Market Value-2024', '2024 VPR'])
+    df = df.dropna(subset=cols_to_numeric)
 
     df['Hotel Class Order'] = df['Hotel Class'].map(hotel_class_map)
     df = df.dropna(subset=['Hotel Class Order'])
     df['Hotel Class Order'] = df['Hotel Class Order'].astype(int)
+
     df['Project / Hotel Name'] = df['Project / Hotel Name'].astype(str).str.strip()
 
-    project_names = df['Project / Hotel Name'].dropna().unique().tolist()
+    # Keep duplicates — full list of Property_Address
+    Property_Address = df['Project / Hotel Name'].dropna().astype(str).str.strip().tolist()
 
     selected_hotels = st.multiselect(
-        "🏨 Select Hotel(s)",
-        options=["[SELECT ALL]"] + project_names,
+        "🏨 Select Project / Hotel Name",
+        options=["[SELECT ALL]"] + Property_Address,
         default=["[SELECT ALL]"]
     )
 
@@ -69,71 +73,107 @@ if uploaded_file:
     else:
         selected_rows = df[df['Project / Hotel Name'].isin(selected_hotels)]
 
-    # Filters
-    mv_min = st.number_input("🔽 Market Value Min Filter %", 0.0, 500.0, 80.0, 1.0)
-    mv_max = st.number_input("🔼 Market Value Max Filter %", mv_min, 500.0, 120.0, 1.0)
-    vpr_min = st.number_input("🔽 VPR Min Filter %", 0.0, 500.0, 80.0, 1.0)
-    vpr_max = st.number_input("🔼 VPR Max Filter %", vpr_min, 500.0, 120.0, 1.0)
+    # Market Value filters
+    col1, col2 = st.columns(2)
+    with col1:
+        mv_min = st.number_input("🔽 Market Value Min Filter %", 0.0, 500.0, 80.0, 1.0)
+    with col2:
+        mv_max = st.number_input("🔼 Market Value Max Filter %", mv_min, 500.0, 120.0, 1.0)
 
-    max_results_per_row = 5
-    all_columns = df.columns.tolist()
+    # VPR filters
+    col3, col4 = st.columns(2)
+    with col3:
+        vpr_min = st.number_input("🔽 VPR Min Filter %", 0.0, 500.0, 80.0, 1.0)
+    with col4:
+        vpr_max = st.number_input("🔼 VPR Max Filter %", vpr_min, 500.0, 120.0, 1.0)
+
+  
+    match_columns = [
+        'Project / Hotel Name', 'State', 'Property County',
+        'No. of Rooms', 'Market Value-2024', '2024 VPR',
+        'Hotel Class', 'Hotel Class Order'
+    ]
+    all_columns = [col for col in df.columns if col != 'Hotel Class Order'] + ['Hotel Class Order']
 
     if st.button("🚀 Run Matching"):
-        result_rows = []
+        results_rows = []
 
-        with st.spinner("🔍 Matching in progress..."):
+        with st.spinner("🔍 Matching hotels, please wait..."):
             for _, base_row in selected_rows.iterrows():
-                base_name = base_row['Project / Hotel Name']
-                base_market_val = base_row['Market Value-2024']
-                base_vpr = base_row['2024 VPR']
-                base_order = base_row['Hotel Class Order']
-                allowed_orders = allowed_orders_map.get(base_order, [])
+                try:
+                    base_market_val = base_row['Market Value-2024']
+                    base_vpr = base_row['2024 VPR']
+                    base_order = base_row['Hotel Class Order']
+                    allowed_orders = allowed_orders_map.get(base_order, [])
 
-                subset = df[df.index != base_row.name]
-                mask = (
-                    (subset['State'] == base_row['State']) &
-                    (subset['Property County'] == base_row['Property County']) &
-                    (subset['No. of Rooms'] < base_row['No. of Rooms']) &
-                    (subset['Market Value-2024'].between(base_market_val * (mv_min / 100), base_market_val * (mv_max / 100))) &
-                    (subset['2024 VPR'].between(base_vpr * (vpr_min / 100), base_vpr * (vpr_max / 100))) &
-                    (subset['Hotel Class Order'].isin(allowed_orders))
-                )
+                    subset = df[df.index != base_row.name]
 
-                matching_rows = subset[mask].drop_duplicates(
-                    subset=['Project / Hotel Name', 'Owner Street Address', 'Owner Name/ LLC Name'],
-                    keep='first'
-                )
+                    mask = (
+                        (subset['State'] == base_row['State']) &
+                        (subset['Property County'] == base_row['Property County']) &
+                        (subset['No. of Rooms'] < base_row['No. of Rooms']) &
+                        (subset['Market Value-2024'].between(base_market_val * (mv_min / 100), base_market_val * (mv_max / 100))) &
+                        (subset['2024 VPR'].between(base_vpr * (vpr_min / 100), base_vpr * (vpr_max / 100))) &
+                        (subset['Hotel Class Order'].isin(allowed_orders))
+                    )
 
-                if not matching_rows.empty:
-                    nearest_3 = get_nearest_three(matching_rows, base_market_val, base_vpr)
-                    remaining = matching_rows[~matching_rows.index.isin(nearest_3.index)]
-                    least_1 = get_least_one(remaining)
-                    remaining = remaining[~remaining.index.isin(least_1.index)]
-                    top_1 = get_top_one(remaining)
+                    matching_rows = subset[mask].drop_duplicates(
+                        subset=['Project / Hotel Name', 'Owner Street Address', 'Owner Name/ LLC Name'], keep='first'
+                    )
 
-                    final_matches = pd.concat([nearest_3, least_1, top_1]).drop_duplicates().reset_index(drop=True)
+                    base_data = base_row[match_columns].to_dict()
 
-                    for idx in range(min(max_results_per_row, len(final_matches))):
-                        match_row = final_matches.iloc[idx]
-                        combined = match_row.copy()
-                        combined['Base Hotel'] = base_name
-                        combined['Result No.'] = idx + 1
-                        result_rows.append(combined)
-                else:
-                    st.info(f"No matches found for **{base_name}**.")
+                    if not matching_rows.empty:
+                        nearest_3 = get_nearest_three(matching_rows, base_market_val, base_vpr)
+                        remaining = matching_rows[~matching_rows.index.isin(nearest_3.index)]
+                        least_1 = get_least_one(remaining)
+                        remaining = remaining[~remaining.index.isin(least_1.index)]
+                        top_1 = get_top_one(remaining)
 
-        if result_rows:
-            result_df = pd.DataFrame(result_rows)
-            st.success("✅ Matching complete")
+                        selected_rows_final = pd.concat([nearest_3, least_1, top_1]).drop_duplicates().reset_index(drop=True)
+                        result_count = min(len(selected_rows_final), max_results_per_row)
+
+                        combined_row = base_data.copy()
+                        combined_row['Matching Results Count / Status'] = f"Total: {len(matching_rows)} | Selected: {result_count}"
+
+                        for idx in range(max_results_per_row):
+                            prefix = f"Result {idx + 1} - "
+                            if idx < result_count:
+                                match_row = selected_rows_final.iloc[idx]
+                                for col in all_columns:
+                                    combined_row[prefix + col] = match_row[col]
+                            else:
+                                for col in all_columns:
+                                    combined_row[prefix + col] = None
+
+                        results_rows.append(combined_row)
+                    else:
+                        combined_row = base_data.copy()
+                        combined_row['Matching Results Count / Status'] = 'No_Match_Case'
+                        for idx in range(max_results_per_row):
+                            prefix = f"Result {idx + 1} - "
+                            for col in all_columns:
+                                combined_row[prefix + col] = None
+                        results_rows.append(combined_row)
+
+                except Exception as e:
+                    st.error(f"❌ Error processing hotel '{base_row['Project / Hotel Name']}': {e}")
+
+        if results_rows:
+            result_df = pd.DataFrame(results_rows)
+            st.success("✅ Matching Completed")
             st.dataframe(result_df)
+
+            st.write(f"🏁 **Summary**:")
+            st.write(f"- Total processed: {len(result_df)}")
+            st.write(f"- Matches found: {(result_df['Matching Results Count / Status'] != 'No_Match_Case').sum()}")
+            st.write(f"- No matches: {(result_df['Matching Results Count / Status'] == 'No_Match_Case').sum()}")
 
             output = io.BytesIO()
             result_df.to_excel(output, index=False)
             st.download_button(
-                label="📥 Download All Matched Results",
+                label="📥 Download Result as Excel",
                 data=output.getvalue(),
-                file_name="hotel_matched_results.xlsx",
+                file_name="hotel_matching_result.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        else:
-            st.warning("⚠️ No matching results to download.")
