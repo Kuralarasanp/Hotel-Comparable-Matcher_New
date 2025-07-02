@@ -40,43 +40,43 @@ def get_nearest_three(df, target_mv, target_vpr):
 
 # Streamlit UI
 st.title("🏨 Hotel Comparable Matcher Tool")
-... 
-... uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
-... 
-... if uploaded_file:
-...     df = pd.read_excel(uploaded_file)
-...     df.columns = [col.strip() for col in df.columns]
-... 
-...     # Clean and preprocess
-...     cols_to_numeric = ['No. of Rooms', 'Market Value-2024', '2024 VPR']
-...     for col in cols_to_numeric:
-...         df[col] = pd.to_numeric(df[col], errors='coerce')
-...     df = df.dropna(subset=cols_to_numeric)
-... 
-...     df['Hotel Class Order'] = df['Hotel Class'].map(hotel_class_map)
-...     df = df.dropna(subset=['Hotel Class Order'])
-...     df['Hotel Class Order'] = df['Hotel Class Order'].astype(int)
-... 
-...     df['Project / Hotel Name'] = df['Project / Hotel Name'].astype(str).str.strip()
-... 
-...     # Keep duplicates — full list of hotel names
-...     hotel_names = df['Project / Hotel Name'].dropna().astype(str).str.strip().tolist()
-... 
-...     selected_hotels = st.multiselect(
-...         "🏨 Select Project / Hotel Name(s)",
-...         options=["[SELECT ALL]"] + hotel_names,
-...         default=["[SELECT ALL]"]
-...     )
-... 
-...     if "[SELECT ALL]" in selected_hotels:
-...         selected_rows = df.copy()
-...     else:
-...         selected_rows = df[df['Project / Hotel Name'].isin(selected_hotels)]
-... 
-...     # Market Value filters
-...     col1, col2 = st.columns(2)
-...     with col1:
-...         mv_min = st.number_input("🔽 Market Value Min Filter %", 0.0, 500.0, 80.0, 1.0)
+
+uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
+
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
+    df.columns = [col.strip() for col in df.columns]
+
+    # Clean and preprocess
+    cols_to_numeric = ['No. of Rooms', 'Market Value-2024', '2024 VPR']
+    for col in cols_to_numeric:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=cols_to_numeric)
+
+    df['Hotel Class Order'] = df['Hotel Class'].map(hotel_class_map)
+    df = df.dropna(subset=['Hotel Class Order'])
+    df['Hotel Class Order'] = df['Hotel Class Order'].astype(int)
+
+    df['Project / Hotel Name'] = df['Project / Hotel Name'].astype(str).str.strip()
+
+    # Full list of hotel names
+    hotel_names = df['Project / Hotel Name'].dropna().astype(str).str.strip().tolist()
+
+    selected_hotels = st.multiselect(
+        "🏨 Select Project / Hotel Name(s)",
+        options=["[SELECT ALL]"] + hotel_names,
+        default=["[SELECT ALL]"]
+    )
+
+    if "[SELECT ALL]" in selected_hotels:
+        selected_rows = df.copy()
+    else:
+        selected_rows = df[df['Project / Hotel Name'].isin(selected_hotels)]
+
+    # Market Value filters
+    col1, col2 = st.columns(2)
+    with col1:
+        mv_min = st.number_input("🔽 Market Value Min Filter %", 0.0, 500.0, 80.0, 1.0)
     with col2:
         mv_max = st.number_input("🔼 Market Value Max Filter %", mv_min, 500.0, 120.0, 1.0)
 
@@ -178,3 +178,4 @@ st.title("🏨 Hotel Comparable Matcher Tool")
                 data=output.getvalue(),
                 file_name="hotel_matching_result.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
