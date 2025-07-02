@@ -26,6 +26,8 @@ allowed_orders_map = {
     8: [7, 8]
 }
 
+max_results_per_row = 5  # Max matches shown per base hotel
+
 # Matching logic helpers
 def get_least_one(df):
     return df.sort_values(['Market Value-2024', '2024 VPR'], ascending=[True, True]).head(1)
@@ -44,10 +46,7 @@ st.title("🏨 Hotel Comparable Matcher Tool")
 uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
 
 if uploaded_file:
-    import openpyxl  # Make sure openpyxl is imported
-
-    uploaded_file.seek(0)  # Reset file pointer to start before reading
-    df = pd.read_excel(uploaded_file, engine='openpyxl')
+    df = pd.read_excel(uploaded_file)
     df.columns = [col.strip() for col in df.columns]
 
     # Clean and preprocess
@@ -62,12 +61,12 @@ if uploaded_file:
 
     df['Project / Hotel Name'] = df['Project / Hotel Name'].astype(str).str.strip()
 
-    # Full list of hotel names (including duplicates)
-    hotel_names = df['Project / Hotel Name'].dropna().astype(str).str.strip().tolist()
+    # Keep duplicates — full list of Property_Address
+    Property_Address = df['Project / Hotel Name'].dropna().astype(str).str.strip().tolist()
 
     selected_hotels = st.multiselect(
-        "🏨 Select Project / Hotel Name(s)",
-        options=["[SELECT ALL]"] + hotel_names,
+        "🏨 Select Project / Hotel Name",
+        options=["[SELECT ALL]"] + Property_Address,
         default=["[SELECT ALL]"]
     )
 
@@ -90,9 +89,6 @@ if uploaded_file:
     with col4:
         vpr_max = st.number_input("🔼 VPR Max Filter %", vpr_min, 500.0, 120.0, 1.0)
 
-    # Max results
-    max_results_per_row = st.slider("🔢 Max Matches Per Hotel", 1, 10, 5)
-
     match_columns = [
         'Project / Hotel Name', 'State', 'Property County',
         'No. of Rooms', 'Market Value-2024', '2024 VPR',
@@ -101,7 +97,7 @@ if uploaded_file:
     all_columns = [col for col in df.columns if col != 'Hotel Class Order'] + ['Hotel Class Order']
 
     if st.button("🚀 Run Matching"):
-        results_rows = []
+        selection_dict = {}
 
         with st.spinner("🔍 Matching hotels, please wait..."):
             for _, base_row in selected_rows.iterrows():
@@ -126,8 +122,6 @@ if uploaded_file:
                         subset=['Project / Hotel Name', 'Owner Street Address', 'Owner Name/ LLC Name'], keep='first'
                     )
 
-                    base_data = base_row[match_columns].to_dict()
-
                     if not matching_rows.empty:
                         nearest_3 = get_nearest_three(matching_rows, base_market_val, base_vpr)
                         remaining = matching_rows[~matching_rows.index.isin(nearest_3.index)]
@@ -138,47 +132,47 @@ if uploaded_file:
                         selected_rows_final = pd.concat([nearest_3, least_1, top_1]).drop_duplicates().reset_index(drop=True)
                         result_count = min(len(selected_rows_final), max_results_per_row)
 
-                        combined_row = base_data.copy()
-                        combined_row['Matching Results Count / Status'] = f"Total: {len(matching_rows)} | Selected: {result_count}"
+                        st.markdown(f"### Base Hotel: {base_row['Project / Hotel Name']} (Matches found: {len(matching_rows)})")
 
-                        for idx in range(max_results_per_row):
-                            prefix = f"Result {idx + 1} - "
-                            if idx < result_count:
-                                match_row = selected_rows_final.iloc[idx]
-                                for col in all_columns:
-                                    combined_row[prefix + col] = match_row[col]
-                            else:
-                                for col in all_columns:
-                                    combined_row[prefix + col] = None
+                        selected_for_base = []
+                        for idx in range(result_count):
+                            match_row = selected_rows_final.iloc[idx]
+                            label = (
+                                f"Result {idx + 1}: {match_row['Project / Hotel Name']} | "
+                                f"State: {match_row['State']} | "
+                                f"Market Value: {match_row['Market Value-2024']:.2f} | "
+                                f"VPR: {match_row['2024 VPR']:.2f}"
+                            )
+                            checked = st.checkbox(label, key=f"{base_row['Project / Hotel Name']}_match_{idx}")
+                            if checked:
+                                selected_for_base.append(match_row)
 
-                        results_rows.append(combined_row)
+                        selection_dict[base_row['Project / Hotel Name']] = selected_for_base
+
                     else:
-                        combined_row = base_data.copy()
-                        combined_row['Matching Results Count / Status'] = 'No_Match_Case'
-                        for idx in range(max_results_per_row):
-                            prefix = f"Result {idx + 1} - "
-                            for col in all_columns:
-                                combined_row[prefix + col] = None
-                        results_rows.append(combined_row)
+                        st.write(f"No matches found for **{base_row['Project / Hotel Name']}**.")
 
                 except Exception as e:
                     st.error(f"❌ Error processing hotel '{base_row['Project / Hotel Name']}': {e}")
 
-        if results_rows:
-            result_df = pd.DataFrame(results_rows)
-            st.success("✅ Matching Completed")
-            st.dataframe(result_df)
+        # After user selects checkboxes, gather and allow download of selected matches
+        export_rows = []
+        for base_name, matches in selection_dict.items():
+            for match in matches:
+                export_rows.append(match)
 
-            st.write(f"🏁 **Summary**:")
-            st.write(f"- Total processed: {len(result_df)}")
-            st.write(f"- Matches found: {(result_df['Matching Results Count / Status'] != 'No_Match_Case').sum()}")
-            st.write(f"- No matches: {(result_df['Matching Results Count / Status'] == 'No_Match_Case').sum()}")
+        if export_rows:
+            export_df = pd.DataFrame(export_rows)
+            st.write("### Selected Matches to Export")
+            st.dataframe(export_df)
 
             output = io.BytesIO()
-            result_df.to_excel(output, index=False)
+            export_df.to_excel(output, index=False)
             st.download_button(
-                label="📥 Download Result as Excel",
+                label="📥 Download Selected Matches as Excel",
                 data=output.getvalue(),
-                file_name="hotel_matching_result.xlsx",
+                file_name="selected_hotel_matches.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+        else:
+            st.info("No matched results selected for download.")
