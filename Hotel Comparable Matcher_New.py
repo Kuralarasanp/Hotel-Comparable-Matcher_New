@@ -44,7 +44,10 @@ st.title("🏨 Hotel Comparable Matcher Tool")
 uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
 
 if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+    import openpyxl  # Make sure openpyxl is imported
+
+    uploaded_file.seek(0)  # Reset file pointer to start before reading
+    df = pd.read_excel(uploaded_file, engine='openpyxl')
     df.columns = [col.strip() for col in df.columns]
 
     # Clean and preprocess
@@ -59,7 +62,7 @@ if uploaded_file:
 
     df['Project / Hotel Name'] = df['Project / Hotel Name'].astype(str).str.strip()
 
-    # Full list of hotel names
+    # Full list of hotel names (including duplicates)
     hotel_names = df['Project / Hotel Name'].dropna().astype(str).str.strip().tolist()
 
     selected_hotels = st.multiselect(
