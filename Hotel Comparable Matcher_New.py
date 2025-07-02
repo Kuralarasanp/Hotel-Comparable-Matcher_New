@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
+import openpyxl
 
 # Hotel class mapping
 hotel_class_map = {
