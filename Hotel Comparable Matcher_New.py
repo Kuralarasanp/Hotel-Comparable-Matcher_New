@@ -57,13 +57,13 @@ if uploaded_file:
     df = df.dropna(subset=['Hotel Class Order'])
     df['Hotel Class Order'] = df['Hotel Class Order'].astype(int)
 
-    df['Project / Hotel Name'] = df['Project / Hotel Name'].astype(str).str.strip()
+    df['Property Address'] = df['Property Address'].astype(str).str.strip()
 
-    # Keep duplicates — full list of Property_Address
-    Property_Address = df['Project / Hotel Name'].dropna().astype(str).str.strip().tolist()
+    # Property list
+    Property_Address = df['Property Address'].dropna().astype(str).str.strip().tolist()
 
     selected_hotels = st.multiselect(
-        "🏨 Select Project / Hotel Name",
+        "🏨 Select Property Address",
         options=["[SELECT ALL]"] + Property_Address,
         default=["[SELECT ALL]"]
     )
@@ -71,7 +71,7 @@ if uploaded_file:
     if "[SELECT ALL]" in selected_hotels:
         selected_rows = df.copy()
     else:
-        selected_rows = df[df['Project / Hotel Name'].isin(selected_hotels)]
+        selected_rows = df[df['Property Address'].isin(selected_hotels)]
 
     # Market Value filters
     col1, col2 = st.columns(2)
@@ -91,7 +91,7 @@ if uploaded_file:
     max_results_per_row = st.slider("🔢 Max Matches Per Hotel", 1, 10, 5)
 
     match_columns = [
-        'Project / Hotel Name', 'State', 'Property County',
+        'Property Address', 'State', 'Property County',
         'No. of Rooms', 'Market Value-2024', '2024 VPR',
         'Hotel Class', 'Hotel Class Order'
     ]
@@ -159,23 +159,49 @@ if uploaded_file:
                         results_rows.append(combined_row)
 
                 except Exception as e:
-                    st.error(f"❌ Error processing hotel '{base_row['Project / Hotel Name']}': {e}")
+                    st.error(f"❌ Error processing hotel '{base_row['Property Address']}': {e}")
 
         if results_rows:
             result_df = pd.DataFrame(results_rows)
             st.success("✅ Matching Completed")
-            st.dataframe(result_df)
 
-            st.write(f"🏁 **Summary**:")
-            st.write(f"- Total processed: {len(result_df)}")
-            st.write(f"- Matches found: {(result_df['Matching Results Count / Status'] != 'No_Match_Case').sum()}")
-            st.write(f"- No matches: {(result_df['Matching Results Count / Status'] == 'No_Match_Case').sum()}")
+            # Add a selection UI
+            result_df_display = result_df.copy()
+            result_df_display.insert(0, "✅ Select", False)
 
-            output = io.BytesIO()
-            result_df.to_excel(output, index=False)
-            st.download_button(
-                label="📥 Download Result as Excel",
-                data=output.getvalue(),
-                file_name="hotel_matching_result.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            st.write("### 🧾 Full Matching Result")
+            selected_indices = st.multiselect(
+                "🔘 Select rows to include in the download (based on index):",
+                options=result_df_display.index.tolist(),
+                default=[]
             )
+
+            # Mark selected
+            result_df_display["✅ Select"] = result_df_display.index.isin(selected_indices)
+            st.dataframe(result_df_display)
+
+            # Summary
+            total_processed = len(result_df)
+            match_count = (result_df['Matching Results Count / Status'] != 'No_Match_Case').sum()
+            no_match_count = total_processed - match_count
+
+            st.write("### 🧮 Summary")
+            st.write(f"- Total processed: **{total_processed}**")
+            st.write(f"- Matches found: **{match_count}**")
+            st.write(f"- No matches: **{no_match_count}**")
+
+            if match_count > 0 and selected_indices:
+                download_df = result_df.loc[selected_indices].reset_index(drop=True)
+                output = io.BytesIO()
+                download_df.to_excel(output, index=False)
+
+                st.download_button(
+                    label="📥 Download Selected Matches as Excel",
+                    data=output.getvalue(),
+                    file_name="selected_hotel_matching_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            elif match_count > 0:
+                st.info("☑️ Please select at least one row above to enable download.")
+            else:
+                st.info("ℹ️ No matches found — nothing to download.")
