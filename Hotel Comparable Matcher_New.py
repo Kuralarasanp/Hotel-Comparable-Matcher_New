@@ -2,23 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
-import sys
-import subprocess
 
-# --------------------------------------------
-# Runtime openpyxl install fallback (only once)
-# --------------------------------------------
-try:
-    import openpyxl
-except ImportError:
-    st.warning("Installing openpyxl dynamically...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
-    import openpyxl
-    st.success("✅ openpyxl installed successfully.")
-
-# --------------------------------------------
-# Hotel Class Mapping
-# --------------------------------------------
+# Hotel class mapping
 hotel_class_map = {
     "Budget (Low End)": 1,
     "Economy (Name Brand)": 2,
@@ -41,9 +26,7 @@ allowed_orders_map = {
     8: [7, 8]
 }
 
-# --------------------------------------------
 # Matching logic helpers
-# --------------------------------------------
 def get_least_one(df):
     return df.sort_values(['Market Value-2024', '2024 VPR'], ascending=[True, True]).head(1)
 
@@ -55,16 +38,14 @@ def get_nearest_three(df, target_mv, target_vpr):
     df['distance'] = np.sqrt((df['Market Value-2024'] - target_mv) ** 2 + (df['2024 VPR'] - target_vpr) ** 2)
     return df.sort_values('distance').head(3).drop(columns='distance')
 
-# --------------------------------------------
 # Streamlit UI
-# --------------------------------------------
 st.title("🏨 Hotel Comparable Matcher Tool")
 
 uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
 
 if uploaded_file:
     try:
-        df = pd.read_excel(uploaded_file, engine='openpyxl')  # Force openpyxl usage
+        df = pd.read_excel(uploaded_file, engine='openpyxl')  # Explicit engine here
     except Exception as e:
         st.error(f"❌ Failed to read Excel file: {e}")
         st.stop()
@@ -187,22 +168,15 @@ if uploaded_file:
             result_df = pd.DataFrame(results_rows)
             st.success("✅ Matching Completed")
 
-            # Add a selection UI
-            result_df_display = result_df.copy()
-            result_df_display.insert(0, "✅ Select", False)
-
-            st.write("### 🧾 Full Matching Result")
+            # Selection UI to pick which results to download
             selected_indices = st.multiselect(
-                "🔘 Select rows to include in the download (based on index):",
-                options=result_df_display.index.tolist(),
-                default=[]
+                "🔘 Select rows to download",
+                options=result_df.index.tolist(),
+                format_func=lambda x: f"Row {x}: {result_df.at[x, 'Property Address']}"
             )
 
-            # Mark selected
-            result_df_display["✅ Select"] = result_df_display.index.isin(selected_indices)
-            st.dataframe(result_df_display)
+            st.dataframe(result_df)
 
-            # Summary
             total_processed = len(result_df)
             match_count = (result_df['Matching Results Count / Status'] != 'No_Match_Case').sum()
             no_match_count = total_processed - match_count
@@ -212,7 +186,6 @@ if uploaded_file:
             st.write(f"- ❌ No Matches: {no_match_count}")
             st.write(f"- 🔢 Total Processed: {total_processed}")
 
-            # Download only if matches were found and selected
             if selected_indices:
                 filtered_df = result_df.loc[selected_indices]
                 output = io.BytesIO()
