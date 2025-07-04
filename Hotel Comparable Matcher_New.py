@@ -2,8 +2,23 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
+import sys
+import subprocess
 
-# Hotel class mapping
+# --------------------------------------------
+# Runtime openpyxl install fallback (only once)
+# --------------------------------------------
+try:
+    import openpyxl
+except ImportError:
+    st.warning("Installing openpyxl dynamically...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
+    import openpyxl
+    st.success("✅ openpyxl installed successfully.")
+
+# --------------------------------------------
+# Hotel Class Mapping
+# --------------------------------------------
 hotel_class_map = {
     "Budget (Low End)": 1,
     "Economy (Name Brand)": 2,
@@ -26,7 +41,9 @@ allowed_orders_map = {
     8: [7, 8]
 }
 
+# --------------------------------------------
 # Matching logic helpers
+# --------------------------------------------
 def get_least_one(df):
     return df.sort_values(['Market Value-2024', '2024 VPR'], ascending=[True, True]).head(1)
 
@@ -38,13 +55,20 @@ def get_nearest_three(df, target_mv, target_vpr):
     df['distance'] = np.sqrt((df['Market Value-2024'] - target_mv) ** 2 + (df['2024 VPR'] - target_vpr) ** 2)
     return df.sort_values('distance').head(3).drop(columns='distance')
 
+# --------------------------------------------
 # Streamlit UI
+# --------------------------------------------
 st.title("🏨 Hotel Comparable Matcher Tool")
 
 uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
 
 if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+    try:
+        df = pd.read_excel(uploaded_file, engine='openpyxl')  # Force openpyxl usage
+    except Exception as e:
+        st.error(f"❌ Failed to read Excel file: {e}")
+        st.stop()
+
     df.columns = [col.strip() for col in df.columns]
 
     # Clean and preprocess
@@ -56,10 +80,9 @@ if uploaded_file:
     df['Hotel Class Order'] = df['Hotel Class'].map(hotel_class_map)
     df = df.dropna(subset=['Hotel Class Order'])
     df['Hotel Class Order'] = df['Hotel Class Order'].astype(int)
-
     df['Property Address'] = df['Property Address'].astype(str).str.strip()
 
-    # Property list
+    # Property selection
     Property_Address = df['Property Address'].dropna().astype(str).str.strip().tolist()
 
     selected_hotels = st.multiselect(
@@ -87,7 +110,6 @@ if uploaded_file:
     with col4:
         vpr_max = st.number_input("🔼 VPR Max Filter %", vpr_min, 500.0, 120.0, 1.0)
 
-    # Max results
     max_results_per_row = st.slider("🔢 Max Matches Per Hotel", 1, 10, 5)
 
     match_columns = [
@@ -185,23 +207,23 @@ if uploaded_file:
             match_count = (result_df['Matching Results Count / Status'] != 'No_Match_Case').sum()
             no_match_count = total_processed - match_count
 
-            st.write("### 🧮 Summary")
-            st.write(f"- Total processed: **{total_processed}**")
-            st.write(f"- Matches found: **{match_count}**")
-            st.write(f"- No matches: **{no_match_count}**")
+            st.write("### 📊 Summary")
+            st.write(f"- ✅ Matches Found: {match_count}")
+            st.write(f"- ❌ No Matches: {no_match_count}")
+            st.write(f"- 🔢 Total Processed: {total_processed}")
 
-            if match_count > 0 and selected_indices:
-                download_df = result_df.loc[selected_indices].reset_index(drop=True)
+            # Download only if matches were found and selected
+            if selected_indices:
+                filtered_df = result_df.loc[selected_indices]
                 output = io.BytesIO()
-                download_df.to_excel(output, index=False)
-
+                filtered_df.to_excel(output, index=False)
                 st.download_button(
                     label="📥 Download Selected Matches as Excel",
                     data=output.getvalue(),
-                    file_name="selected_hotel_matching_results.xlsx",
+                    file_name="hotel_selected_matches.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             elif match_count > 0:
-                st.info("☑️ Please select at least one row above to enable download.")
+                st.info("ℹ️ Matches found — select rows above to enable download.")
             else:
-                st.info("ℹ️ No matches found — nothing to download.")
+                st.warning("⚠️ No matches found — nothing to download.")
