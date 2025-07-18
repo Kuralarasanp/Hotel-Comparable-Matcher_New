@@ -3,7 +3,9 @@ import pandas as pd
 import numpy as np
 import io
 
-# Hotel class mapping
+# -----------------------------
+# Mapping Definitions
+# -----------------------------
 hotel_class_map = {
     "Budget (Low End)": 1,
     "Economy (Name Brand)": 2,
@@ -26,7 +28,9 @@ allowed_orders_map = {
     8: [7, 8]
 }
 
-# Matching logic helpers
+# -----------------------------
+# Helper Functions
+# -----------------------------
 def get_least_one(df):
     return df.sort_values(['Market Value-2024', '2024 VPR'], ascending=[True, True]).head(1)
 
@@ -38,21 +42,11 @@ def get_nearest_three(df, target_mv, target_vpr):
     df['distance'] = np.sqrt((df['Market Value-2024'] - target_mv) ** 2 + (df['2024 VPR'] - target_vpr) ** 2)
     return df.sort_values('distance').head(3).drop(columns='distance')
 
-# Streamlit UI
-st.title("🏨 Hotel Comparable Matcher Tool")
-
-uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
-
-if uploaded_file:
-    try:
-        df = pd.read_excel(uploaded_file, engine='openpyxl')  # Explicit engine here
-    except Exception as e:
-        st.error(f"❌ Failed to read Excel file: {e}")
-        st.stop()
-
+@st.cache_data
+def load_excel(uploaded_file):
+    df = pd.read_excel(uploaded_file, engine='openpyxl')
     df.columns = [col.strip() for col in df.columns]
-
-    # Clean and preprocess
+    
     cols_to_numeric = ['No. of Rooms', 'Market Value-2024', '2024 VPR']
     for col in cols_to_numeric:
         df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -63,12 +57,28 @@ if uploaded_file:
     df['Hotel Class Order'] = df['Hotel Class Order'].astype(int)
     df['Property Address'] = df['Property Address'].astype(str).str.strip()
 
-    # Property selection
-    Property_Address = df['Property Address'].dropna().astype(str).str.strip().tolist()
+    return df
+
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+st.set_page_config(page_title="Hotel Matcher", layout="wide")
+st.title("🏨 Hotel Comparable Matcher Tool")
+
+uploaded_file = st.file_uploader("📤 Upload Excel File (.xlsx)", type=['xlsx'])
+
+if uploaded_file:
+    try:
+        df = load_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"❌ Failed to read Excel file: {e}")
+        st.stop()
+
+    property_list = df['Property Address'].dropna().tolist()
 
     selected_hotels = st.multiselect(
         "🏨 Select Property Address",
-        options=["[SELECT ALL]"] + Property_Address,
+        options=["[SELECT ALL]"] + property_list,
         default=["[SELECT ALL]"]
     )
 
@@ -77,40 +87,37 @@ if uploaded_file:
     else:
         selected_rows = df[df['Property Address'].isin(selected_hotels)]
 
-    # Market Value filters
+    # Filters
     col1, col2 = st.columns(2)
     with col1:
-        mv_min = st.number_input("🔽 Market Value Min Filter %", 0.0, 500.0, 80.0, 1.0)
+        mv_min = st.number_input("🔽 Market Value Min %", 0.0, 500.0, 80.0)
     with col2:
-        mv_max = st.number_input("🔼 Market Value Max Filter %", mv_min, 500.0, 120.0, 1.0)
+        mv_max = st.number_input("🔼 Market Value Max %", mv_min, 500.0, 120.0)
 
-    # VPR filters
     col3, col4 = st.columns(2)
     with col3:
-        vpr_min = st.number_input("🔽 VPR Min Filter %", 0.0, 500.0, 80.0, 1.0)
+        vpr_min = st.number_input("🔽 VPR Min %", 0.0, 500.0, 80.0)
     with col4:
-        vpr_max = st.number_input("🔼 VPR Max Filter %", vpr_min, 500.0, 120.0, 1.0)
+        vpr_max = st.number_input("🔼 VPR Max %", vpr_min, 500.0, 120.0)
 
     max_results_per_row = st.slider("🔢 Max Matches Per Hotel", 1, 10, 5)
 
-    match_columns = [
-        'Property Address', 'State', 'Property County',
-        'No. of Rooms', 'Market Value-2024', '2024 VPR',
-        'Hotel Class', 'Hotel Class Order'
-    ]
-    all_columns = [col for col in df.columns if col != 'Hotel Class Order'] + ['Hotel Class Order']
-
     if st.button("🚀 Run Matching"):
         results_rows = []
+        match_columns = [
+            'Property Address', 'State', 'Property County',
+            'No. of Rooms', 'Market Value-2024', '2024 VPR',
+            'Hotel Class', 'Hotel Class Order'
+        ]
+        all_columns = [col for col in df.columns if col != 'Hotel Class Order'] + ['Hotel Class Order']
 
-        with st.spinner("🔍 Matching hotels, please wait..."):
+        with st.spinner("🔍 Matching in progress..."):
             for _, base_row in selected_rows.iterrows():
                 try:
                     base_market_val = base_row['Market Value-2024']
                     base_vpr = base_row['2024 VPR']
                     base_order = base_row['Hotel Class Order']
                     allowed_orders = allowed_orders_map.get(base_order, [])
-
                     subset = df[df.index != base_row.name]
 
                     mask = (
@@ -162,13 +169,12 @@ if uploaded_file:
                         results_rows.append(combined_row)
 
                 except Exception as e:
-                    st.error(f"❌ Error processing hotel '{base_row['Property Address']}': {e}")
+                    st.error(f"❌ Error on hotel '{base_row['Property Address']}': {e}")
 
         if results_rows:
             result_df = pd.DataFrame(results_rows)
             st.success("✅ Matching Completed")
 
-            # Selection UI to pick which results to download
             selected_indices = st.multiselect(
                 "🔘 Select rows to download",
                 options=result_df.index.tolist(),
@@ -177,13 +183,12 @@ if uploaded_file:
 
             st.dataframe(result_df)
 
-            total_processed = len(result_df)
             match_count = (result_df['Matching Results Count / Status'] != 'No_Match_Case').sum()
-            no_match_count = total_processed - match_count
+            total_processed = len(result_df)
 
             st.write("### 📊 Summary")
             st.write(f"- ✅ Matches Found: {match_count}")
-            st.write(f"- ❌ No Matches: {no_match_count}")
+            st.write(f"- ❌ No Matches: {total_processed - match_count}")
             st.write(f"- 🔢 Total Processed: {total_processed}")
 
             if selected_indices:
@@ -191,12 +196,10 @@ if uploaded_file:
                 output = io.BytesIO()
                 filtered_df.to_excel(output, index=False)
                 st.download_button(
-                    label="📥 Download Selected Matches as Excel",
+                    label="📥 Download Selected Matches",
                     data=output.getvalue(),
                     file_name="hotel_selected_matches.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-            elif match_count > 0:
-                st.info("ℹ️ Matches found — select rows above to enable download.")
             else:
-                st.warning("⚠️ No matches found — nothing to download.")
+                st.info("ℹ️ Select rows above to enable download.")
