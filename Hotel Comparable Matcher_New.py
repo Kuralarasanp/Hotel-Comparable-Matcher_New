@@ -44,7 +44,7 @@ def get_nearest_three(df, target_mv, target_vpr):
 
 @st.cache_data
 def load_excel(uploaded_file):
-    df = pd.read_excel(uploaded_file, engine='openpyxl')
+    df = pd.read_excel(uploaded_file)
     df.columns = [col.strip() for col in df.columns]
     
     cols_to_numeric = ['No. of Rooms', 'Market Value-2024', '2024 VPR']
