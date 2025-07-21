@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import io
 
-# Hotel class mapping
+# === Hotel Class Mapping ===
 hotel_class_map = {
     "Budget (Low End)": 1,
     "Economy (Name Brand)": 2,
@@ -15,6 +15,7 @@ hotel_class_map = {
     "Independent Hotel": 8
 }
 
+# === Allowed Hotel Class Comparisons ===
 allowed_orders_map = {
     1: [1, 2, 3],
     2: [1, 2, 3, 4],
@@ -26,7 +27,7 @@ allowed_orders_map = {
     8: [7, 8]
 }
 
-# Matching logic helpers
+# === Matching Logic Helpers ===
 def get_least_one(df):
     return df.sort_values(['Market Value-2024', '2024 VPR'], ascending=[True, True]).head(1)
 
@@ -38,56 +39,55 @@ def get_nearest_three(df, target_mv, target_vpr):
     df['distance'] = np.sqrt((df['Market Value-2024'] - target_mv) ** 2 + (df['2024 VPR'] - target_vpr) ** 2)
     return df.sort_values('distance').head(3).drop(columns='distance')
 
-# Streamlit UI
+# === Streamlit App UI ===
 st.title("🏨 Hotel Comparable Matcher Tool")
 
 uploaded_file = st.file_uploader("📤 Upload Excel File", type=['xlsx'])
 
 if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+    try:
+        df = pd.read_excel(uploaded_file, engine="openpyxl")
+    except Exception as e:
+        st.error(f"❌ Failed to read Excel file: {e}")
+        st.stop()
+
     df.columns = [col.strip() for col in df.columns]
 
-    # Clean and preprocess
-    cols_to_numeric = ['No. of Rooms', 'Market Value-2024', '2024 VPR']
-    for col in cols_to_numeric:
+    # Ensure numeric columns are cleaned
+    numeric_cols = ['No. of Rooms', 'Market Value-2024', '2024 VPR']
+    for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=cols_to_numeric)
+    df = df.dropna(subset=numeric_cols)
 
+    # Map hotel class to numeric order
     df['Hotel Class Order'] = df['Hotel Class'].map(hotel_class_map)
     df = df.dropna(subset=['Hotel Class Order'])
     df['Hotel Class Order'] = df['Hotel Class Order'].astype(int)
-
     df['Property Address'] = df['Property Address'].astype(str).str.strip()
 
-    # Property selection
-    Property_Address = df['Property Address'].dropna().astype(str).str.strip().tolist()
-
+    # Property selector
+    property_list = df['Property Address'].dropna().unique().tolist()
     selected_hotels = st.multiselect(
         "🏨 Select Property Address",
-        options=["[SELECT ALL]"] + Property_Address,
+        options=["[SELECT ALL]"] + property_list,
         default=["[SELECT ALL]"]
     )
 
-    if "[SELECT ALL]" in selected_hotels:
-        selected_rows = df.copy()
-    else:
-        selected_rows = df[df['Property Address'].isin(selected_hotels)]
+    selected_rows = df.copy() if "[SELECT ALL]" in selected_hotels else df[df['Property Address'].isin(selected_hotels)]
 
-    # Market Value filters
+    # Filter inputs
     col1, col2 = st.columns(2)
     with col1:
         mv_min = st.number_input("🔽 Market Value Min Filter %", 0.0, 500.0, 80.0, 1.0)
     with col2:
         mv_max = st.number_input("🔼 Market Value Max Filter %", mv_min, 500.0, 120.0, 1.0)
 
-    # VPR filters
     col3, col4 = st.columns(2)
     with col3:
         vpr_min = st.number_input("🔽 VPR Min Filter %", 0.0, 500.0, 80.0, 1.0)
     with col4:
         vpr_max = st.number_input("🔼 VPR Max Filter %", vpr_min, 500.0, 120.0, 1.0)
 
-    # Matching columns
     match_columns = [
         'Property Address', 'State', 'Property County',
         'No. of Rooms', 'Market Value-2024', '2024 VPR',
@@ -171,14 +171,16 @@ if uploaded_file:
             total_processed = len(result_df)
             no_match_cases = (result_df['Matching Results Count / Status'] == 'No_Match_Case').sum()
 
+            # Summary
             st.write("🏁 **Summary:**")
             st.write(f"- Total processed: **{total_processed}**")
             st.write(f"- Total Matches found: **{total_matches_found}**")
             st.write(f"- Result Matches added: **{total_result_rows}**")
             st.write(f"- No_Match_Case: **{no_match_cases}**")
 
+            # Download button
             output = io.BytesIO()
-            result_df.to_excel(output, index=False)
+            result_df.to_excel(output, index=False, engine='openpyxl')
             st.download_button(
                 label="📥 Download Result as Excel",
                 data=output.getvalue(),
